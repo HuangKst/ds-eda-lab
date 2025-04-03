@@ -21,53 +21,62 @@ export class EDAAppStack extends cdk.Stack {
       autoDeleteObjects: true,
       publicReadAccess: false,
     });
-      // Integration infrastructure
+    // Integration infrastructure
 
-  const queue = new sqs.Queue(this, "img-created-queue", {
-    receiveMessageWaitTime: cdk.Duration.seconds(5),
-  });
+    const imageProcessQueue = new sqs.Queue(this, "img-created-queue", {
+      receiveMessageWaitTime: cdk.Duration.seconds(10),
+    });
+    const newImageTopic = new sns.Topic(this, "NewImageTopic", {
+      displayName: "New Image topic",
+    });
 
-  // Lambda functions
 
-  const processImageFn = new lambdanode.NodejsFunction(
-    this,
-    "ProcessImageFn",
-    {
-      runtime: lambda.Runtime.NODEJS_22_X,
-      entry: `${__dirname}/../lambdas/processImage.ts`,
-      timeout: cdk.Duration.seconds(15),
-      memorySize: 128,
-    }
-  );
 
-  // S3 --> SQS
-  imagesBucket.addEventNotification(
-    s3.EventType.OBJECT_CREATED,
-    new s3n.SqsDestination(queue)
-  );
+    // Lambda functions
 
- // SQS --> Lambda
-  const newImageEventSource = new events.SqsEventSource(queue, {
-    batchSize: 5,
-    maxBatchingWindow: cdk.Duration.seconds(5),
-  });
+    const processImageFn = new lambdanode.NodejsFunction(
+      this,
+      "ProcessImageFn",
+      {
+        runtime: lambda.Runtime.NODEJS_22_X,
+        entry: `${__dirname}/../lambdas/processImage.ts`,
+        timeout: cdk.Duration.seconds(15),
+        memorySize: 128,
+      }
+    );
 
-  processImageFn.addEventSource(newImageEventSource);
+    // S3 --> SQS
+    imagesBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.SnsDestination(newImageTopic)  // Changed
+    );
+    newImageTopic.addSubscription(
+      new subs.SqsSubscription(imageProcessQueue)
+    );
 
-  // Permissions
 
-  imagesBucket.grantRead(processImageFn);
+    // SQS --> Lambda
+    const newImageEventSource = new events.SqsEventSource(imageProcessQueue, {
+      batchSize: 5,
+      maxBatchingWindow: cdk.Duration.seconds(5),
+    });
 
-  // Output
-  
-  new cdk.CfnOutput(this, "bucketName", {
-    value: imagesBucket.bucketName,
-  });
+    processImageFn.addEventSource(newImageEventSource);
+
+    // Permissions
+
+    imagesBucket.grantRead(processImageFn);
+
+    // Output
+
+    new cdk.CfnOutput(this, "bucketName", {
+      value: imagesBucket.bucketName,
+    });
 
 
   }
 
-  
+
 }
 
 
